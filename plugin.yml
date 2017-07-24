@@ -1,0 +1,44 @@
+name: CkPaymentReview
+main: CKylin\CkPaymentReview
+version: 1.0.0
+api: [1.0.0]
+load: POSTWORLD
+author: CKylin
+commands: 
+ payto:
+  description: "Main Commands"
+  usage: "/payto <cmd>"
+  permission: ckpr.cmd.payto
+  aliaes: [转账]
+ checkpay:
+  description: "Check Commands"
+  usage: "/checkpay <cmd>"
+  permission: ckpr.cmd.check
+ allowpay:
+  description: "OP Commands"
+  usage: "/allowpay <cmd>"
+  permission: ckpr.cmd.allow
+ disallowpay:
+  description: "OP Commands"
+  usage: "/disallowpay <cmd>"
+  permission: ckpr.cmd.disallow
+ pays:
+  description: "OP Commands"
+  usage: "/pays <cmd>"
+  permission: ckpr.cmd.pays
+permissions: 
+ ckpr.cmd.payto:
+  description: "Main Commands permissions"
+  default: true
+ ckpr.cmd.check:
+  description: "Check Commands permissions"
+  default: true
+ ckpr.cmd.disallow:
+  description: "OP Commands permissions"
+  default: OP
+ ckpr.cmd.allow:
+  description: "OP Commands permissions"
+  default: OP
+ ckpr.cmd.pays:
+  description: "OP Commands permissions"
+  default: OP
