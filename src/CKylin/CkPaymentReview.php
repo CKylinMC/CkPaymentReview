@@ -70,7 +70,9 @@ class CkPaymentReview extends PluginBase implements Listener
                 $s->sendMessage("[转账] ".Color::YELLOW."用法：/payto <目标玩家> <金额>");
                 return true;
             }
-            $target = $args[0];
+            $tp = $s->getServer()->getPlayer($args[0]);
+            if(!$tp instanceof Player) $s->sendMessage("[转账] ".Color::RED."目标玩家未能找到。".Color::RESET);
+            $target = $tp->getName();
             $money = $args[1];
             $this->newRequest($s->getName(),$target,$money);
             return true;
@@ -94,8 +96,15 @@ class CkPaymentReview extends PluginBase implements Listener
                 return true;
             }
             $id = $args[0];
-            if($this->allowRequest($id,$s->getName())){
+            $statuscode = $this->allowRequest($id,$s->getName());
+            if($statuscode==0){
                 $s->sendMessage("[转账后台] ".Color::GREEN."通过请求处理成功，已完成转账");
+                return true;
+            }elseif($statuscode==1){
+                $s->sendMessage("[转账后台] ".Color::GREEN."请求已经被处理，无法重复处理。");
+                return true;
+            }elseif($statuscode==2){
+                $s->sendMessage("[转账后台] ".Color::GREEN."请求处理时出现错误。");
                 return true;
             }else{
                 $s->sendMessage("[转账后台] ".Color::RED."通过请求处理失败");
@@ -108,8 +117,15 @@ class CkPaymentReview extends PluginBase implements Listener
                 return true;
             }
             $id = $args[0];
-            if($this->rejectRequest($id,$s->getName())){
+            $statuscode = $this->rejectRequest($id,$s->getName());
+            if($statuscode==0){
                 $s->sendMessage("[转账后台] ".Color::GREEN."拒绝请求处理成功，已返还金币");
+                return true;
+            }elseif($statuscode==1){
+                $s->sendMessage("[转账后台] ".Color::GREEN."请求已经被处理，无法重复处理。");
+                return true;
+            }elseif($statuscode==2){
+                $s->sendMessage("[转账后台] ".Color::GREEN."请求处理时出现错误。");
                 return true;
             }else{
                 $s->sendMessage("[转账后台] ".Color::RED."拒绝请求处理失败");
@@ -117,12 +133,34 @@ class CkPaymentReview extends PluginBase implements Listener
             }
         }
         if($cmd=="pays"&&$s->isOp()){
-            $s->sendMessage('[转账后台] 待处理请求：');
-            // $msgs = $this->getPage($this->genReqList(),$args[0]);
-            $msgs = $this->genReqList();
+            $type = empty($args[0]) ? 'waiting' : $args[0];
+            if($type!='waiting'&&$type!='all'){
+                if($type=='w') $type = 'waiting';
+                elseif($type=='a') $type = 'all';
+                else {
+                    $s->sendMessage('[转账后台] 用法：/pays <waiting|all|w|a> [页码]');
+                    return true;
+                }
+            }
+            if($type=='waiting'){
+                $pagenum = empty($args[1]) ? 1 : $args[1];
+                $data = $this->genReqList('waiting');
+                $pages = $this->calcPages(count($data));
+                $msgs = $this->getPage($data,$pagenum);
+                $s->sendMessage("[转账后台] 待处理请求 [ $pagenum / $pages ]：");
+                // $msgs = $this->genReqList('waiting');
+            }else{
+                $pagenum = empty($args[1]) ? 1 : $args[1];
+                $data = $this->genReqList('all');
+                $pages = $this->calcPages(count($data));
+                $msgs = $this->getPage($data,$pagenum);
+                $s->sendMessage("[转账后台] 全部请求 [ $pagenum / $pages ]：");
+                // $msgs = $this->genReqList('all');
+            }
             foreach($msgs as $msg){
                 $s->sendMessage($msg);
             }
+            return true;
         }
     }
 
@@ -245,76 +283,100 @@ class CkPaymentReview extends PluginBase implements Listener
         return $msg;
     }
 
-    public function genReqLine($id){
-        $req = $this->getRequest($id);
+    public function genReqLine($req){
+        // $req = $this->getRequest($id);
         if($req===false) return '未知 ID';
-        $line = "$id | {$req['from']} | {$req['to']} | {$req['money']} | {$req['status']}";
+        $line = "{$req['from']} | {$req['to']} | {$req['money']} | {$req['status']}";
     }
 
     public function genReqList($type = 'waiting'){
         $data = $this->data->getAll();
         $arr = array();
         switch($type){
-            default:
             case 'waiting':
                 foreach($data as $id => $req){
                     if($req['status']===false){
-                        array_push($arr,$this->genReqLine($id));
+                        $stat = $this->getStatusString($req['status']);
+                        array_push($arr,"$id | {$req['from']} | {$req['to']} | {$req['money']} | {$stat}");
                     }
                 }
                 break;
             case '1':
             case 'all':
                 foreach($data as $id => $req){
-                    array_push($arr,$this->genReqLine($id));
+                    $stat = $this->getStatusString($req['status']);
+                    array_push($arr,"$id | {$req['from']} | {$req['to']} | {$req['money']} | {$stat}");
                 }
                 break;
+            default:
+                array_push($arr,'出现错误');
         }
         return $arr;
     }
 
+    public function getStatusString($status){
+        if($status=='Failed'){
+            return "出错";
+        }elseif($status=='Passed'){
+            return "通过";
+        }elseif($status=='Rejected'){
+            return "驳回";
+        }else{
+            return "待审";
+        }
+    }
+
+    // status code:
+    // 0 - success
+    // 1 - status error
+    // 2 - error
+
     public function allowRequest($id,$admin = 'SYSTEM'){
         $id = (string) $id;
         $req = $this->getRequest($id);
-        if($req['status']!=false) return false;
+        if($req['status']!=false) return 1;
         $req['passTime'] = time();
         $req['admin'] = $admin;
         $code = $this->addMoney($req['to'],$req['money']);
         if(!$code){
+            $this->msgOP("[转账审查] $admin 已经通过了 $id 号请求，但是出现了错误。");
             $this->msgbox->msg("[转账] ".Color::YELLOW."您的{$id}号转账请求(目标：{$req['to']} | 金额：{$req['money']})已被通过，但是转账时出现了错误(EcoError {$code})。请联系管理员。",$req['from']);
             $req['status'] = 'Failed';
             $this->data->set($id,$req);
             $this->saveall();
-            return false;
+            return 2;
         }else{
+            $this->msgOP("[转账审查] $admin 已经通过了 $id 号请求。");
             $this->msgbox->msg("[转账] ".Color::GREEN."您的{$id}号转账请求(目标：{$req['to']} | 金额：{$req['money']})已被通过。",$req['from']);
             $this->msgbox->msg("[转账] ".Color::BLUE."收到来自{$req['from']}的转账，金额{$req['money']}。",$req['to']);
             $req['status'] = 'Passed';
             $this->data->set($id,$req);
             $this->saveall();
-            return true;
+            return 0;
         }
     }
 
     public function rejectRequest($id,$admin = 'SYSTEM'){
         $id = (string) $id;
         $req = $this->getRequest($id);
-        if($req['status']!=false) return false;
+        if($req['status']!=false) return 1;
         $req['passTime'] = time();
         $req['admin'] = $admin;
         $code = $this->addMoney($req['from'],$req['money']);
         if(!$code){
+            $this->msgOP("[转账审查] $admin 已经拒绝了 $id 号请求，但是出现了错误。");
             $this->msgbox->msg("[转账] ".Color::RED."您的{$id}号转账请求(目标：{$req['to']} | 金额：{$req['money']})已被驳回，且资金转回时出现了错误(EcoError {$code})。请联系管理员。",$req['from']);
             $req['status'] = 'Failed';
             $this->data->set($id,$req);
             $this->saveall();
-            return false;
+            return 2;
         }else{
+            $this->msgOP("[转账审查] $admin 已经拒绝了 $id 号请求。");
             $this->msgbox->msg("[转账] ".Color::RED."您的{$id}号转账请求(目标：{$req['to']} | 金额：{$req['money']})已被驳回。",$req['from']);
             $req['status'] = 'Rejected';
             $this->data->set($id,$req);
             $this->saveall();
-            return true;
+            return 0;
         }
     }
 
@@ -380,7 +442,7 @@ class CkPaymentReview extends PluginBase implements Listener
     public function msg($msg,$name){
         if(empty($msg)||empty($name)) return false;
         foreach($this->getServer()->getOnlinePlayers() as $p){
-            if(strtolower($p->getName())==strtolower($target)){
+            if(strtolower($p->getName())==strtolower($name)){
                 $p->sendMessage($msg);
                 return true;
                 break;
